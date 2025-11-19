@@ -79,7 +79,7 @@
         const { createClient } = supabase;
         const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        // --- QUIZ DATA ---
+        // --- QUIZ DATA (unchanged) ---
         const quizQuestions = [
             { question: "Who is the CEO of Apple Inc.?", options: ["Steve Jobs", "Tim Cook", "Mark Zuckerberg", "Elon Musk"], answer: "Tim Cook" },
             { question: "Who is the CEO of HDFC Bank (as of 2025)?", options: ["Aditya Puri", "Sashidhar Jagdishan", "N. Chandrasekaran", "Shailesh Chandra"], answer: "Sashidhar Jagdishan" },
@@ -112,14 +112,14 @@
         let timeLeft = TIME_PER_QUESTION;
         let isQuizActive = localStorage.getItem('isQuizActive') === 'false' ? false : true; 
         
-        // Violations
-        let proctoringViolations = { total: 0, windowSwitch: 0, copyPaste: 0, extensionInterference: 0 };
+        // Violations - Extension violations are now merged into windowSwitch
+        let proctoringViolations = { total: 0, windowSwitch: 0, copyPaste: 0 };
         const MAX_VIOLATIONS = 3;
         let violationCooldown = false; 
-        let extensionCheckInterval; // New interval for periodic extension check
+        let extensionCheckInterval; 
         
         // **Universal Edge Thresholds**
-        const EDGE_THRESHOLD = 50; // Pixels from any edge considered a "Danger Zone"
+        const EDGE_THRESHOLD = 50; 
         const TOP_EDGE_THRESHOLD = 50; 
 
         // DOM Elements
@@ -131,7 +131,7 @@
         const QUIZ_OFF_CONFIRM_BTN = document.getElementById('quizOffConfirmBtn');
         const LOADING_OVERLAY = document.getElementById('loadingOverlay');
 
-        // --- UTILITIES ---
+        // --- UTILITIES (unchanged) ---
 
         function generateUUID() {
             if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -203,9 +203,9 @@
                 name, email, admissionNo, score, total: totalQuestions,
                 percentage: percentageVal,
                 violations: violations.total, 
-                windowSwitchViolations: violations.windowSwitch,
+                // Extension violations are now merged into windowSwitchViolations
+                windowSwitchViolations: violations.windowSwitch, 
                 copyPasteViolations: violations.copyPaste,
-                extensionViolations: violations.extensionInterference, // Save new violation type
                 timestamp: new Date().toLocaleString()
             };
             leaderboard.push(result);
@@ -224,9 +224,9 @@
                 total_questions: resultData.total,
                 percentage: resultData.percentage.toString(), 
                 total_violations: resultData.violations,
-                window_switch_violations: resultData.windowSwitchViolations,
+                // window_switch_violations now includes extension detections
+                window_switch_violations: resultData.windowSwitchViolations, 
                 copy_paste_violations: resultData.copyPasteViolations,
-                extension_violations: resultData.extensionViolations, // Add new column for extension violations
                 submission_time: new Date().toISOString(),
                 student_name: resultData.name,
                 college_email: resultData.email,
@@ -284,7 +284,7 @@
                 if (reason === 'swipedown') detailMsg = "Do not swipe from the **top edge** (Notification Panel).";
                 else if (reason === 'swipeleft' || reason === 'swiperight') detailMsg = "Do not swipe from the **side edges** (Browser Navigation).";
                 else if (reason === 'swipeup') detailMsg = "Do not swipe from the **bottom edge** (Control Center/Home Bar).";
-                else if (reason === 'blur') detailMsg = "Do not switch apps or minimize the browser.";
+                else if (reason === 'blur') detailMsg = "Do not switch apps, minimize the browser, or lose focus.";
                 else if (reason === 'copypaste') detailMsg = "Copy/Paste is strictly prohibited.";
                 else if (reason === 'extension') detailMsg = "Unauthorized **browser extension interference** detected.";
 
@@ -320,12 +320,7 @@
             else if (type === 'copyPaste') {
                 proctoringViolations.copyPaste++;
             }
-            else if (type === 'extensionInterference') {
-                if (violationCooldown) return; 
-                proctoringViolations.extensionInterference++;
-                violationCooldown = true;
-                setTimeout(() => { violationCooldown = false; }, 3000); 
-            }
+            // The 'extensionInterference' logic is now handled by the 'windowSwitch' block above.
             else return; 
             
             proctoringViolations.total++;
@@ -334,7 +329,8 @@
             if (vDisplay) vDisplay.innerHTML = `⚠️ Violations: ${proctoringViolations.total} / ${MAX_VIOLATIONS}`;
 
             if (proctoringViolations.total >= MAX_VIOLATIONS) showViolationModal(true, reason); 
-            else if (type === 'windowSwitch' || type === 'extensionInterference') showViolationModal(false, reason); 
+            // Only 'windowSwitch' type (which now includes extension events) triggers the non-terminating modal.
+            else if (type === 'windowSwitch') showViolationModal(false, reason); 
         }
         
         // --- Extension Detection Logic (Indirect/Experimental) ---
@@ -342,17 +338,16 @@
             if (currentQuestionIndex >= quizQuestions.length || violationCooldown) return;
 
             // Check 1: Known injected global properties from common extensions (e.g., ad-blockers, tools)
-            // This is a weak, non-guaranteed check. Names are examples of known global injections.
             if (window.Stranalytics || window.adblocker || window.betterTranslate || window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
-                handleProctoringViolation('extensionInterference', 'extension');
+                // Log as a windowSwitch type violation with reason 'extension'
+                handleProctoringViolation('windowSwitch', 'extension'); 
                 return;
             }
 
             // Check 2: Check for existence of Chrome/Firefox extension APIs outside of a secure context.
-            // Presence of the runtime object on window is sometimes a sign of content scripts.
             if (window.chrome && window.chrome.runtime) {
-                // We assume benign if the quiz is hosted as a local extension, but for web proctoring, this is suspicious.
-                handleProctoringViolation('extensionInterference', 'extension');
+                // Log as a windowSwitch type violation with reason 'extension'
+                handleProctoringViolation('windowSwitch', 'extension');
                 return;
             }
         }
@@ -366,7 +361,7 @@
             handleProctoringViolation('windowSwitch', 'blur'); 
         };
 
-        // 3. EDGE SWIPE DETECTION (TOUCH) - Enhanced for all edges
+        // 3. EDGE SWIPE DETECTION (TOUCH)
         const touchStartHandler = (e) => {
             if (currentQuestionIndex >= quizQuestions.length) return; 
 
@@ -421,7 +416,7 @@
             document.removeEventListener('paste', copyCutPasteHandler);
         }
 
-        // --- TIMER & LOGIC (No changes needed here) ---
+        // --- TIMER & LOGIC (unchanged) ---
         function updateTimerDisplay() {
             const progressBar = document.getElementById('progressBar');
             const countdownTimer = document.getElementById('countdownValue'); 
@@ -595,7 +590,12 @@
 
                     <div class="bg-blue-50 p-6 rounded-xl mb-8 text-left">
                         <div class="flex justify-between mb-2"><span>Score:</span><span class="font-bold">${score} / ${quizQuestions.length}</span></div>
-                        <div class="flex justify-between"><span>Violations:</span><span class="font-bold text-red-600">${proctoringViolations.total} (Extension: ${proctoringViolations.extensionInterference})</span></div>
+                        
+                        <div class="border-t border-blue-100 pt-3 mt-3">
+                            <div class="flex justify-between mb-1"><span class="font-bold">Total Violations Recorded:</span><span class="font-bold text-red-600">${proctoringViolations.total}</span></div>
+                            <div class="flex justify-between text-sm text-gray-700"><span>(Window Switch / Extension / Focus Loss):</span><span class="font-bold">${proctoringViolations.windowSwitch} incidents</span></div>
+                            <div class="flex justify-between text-sm text-gray-700"><span>(Copy/Paste Attempt):</span><span class="font-bold">${proctoringViolations.copyPaste} incidents</span></div>
+                        </div>
                     </div>
 
                     <button onclick="setView('signin')" class="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Return to Sign-In</button>
@@ -603,7 +603,7 @@
             `;
         }
 
-        // --- ADMIN ---
+        // --- ADMIN (unchanged) ---
         function renderAdminLogin() {
             APP_CONTAINER.innerHTML = `
                 <div class="w-full max-w-sm bg-white rounded-xl shadow-xl p-8">
@@ -623,7 +623,7 @@
             };
         }
 
-        // --- SUPABASE LEADERBOARD WITH FILTERS ---
+        // --- SUPABASE LEADERBOARD WITH FILTERS (unchanged logic, as database structure is now consistent) ---
         function renderLeaderboard() {
             APP_CONTAINER.className = "flex items-start justify-center min-h-screen p-4 bg-gray-100";
             APP_CONTAINER.innerHTML = `
